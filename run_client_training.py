@@ -10,7 +10,7 @@ from split_gpt2 import GPT2Config, GPT2LMModel_Client
 
 # --- Configuration ---
 # !!! IMPORTANT: Replace with your friend's local IP address !!!
-SERVER_URL = "http://192.168.1.10:8000/forward" 
+SERVER_URL = "http://192.168.56.1:8000/forward" 
 
 DEVICE = "cpu"
 EPOCHS = 3
@@ -62,7 +62,8 @@ for epoch in range(EPOCHS):
         # Package all necessary data into a dictionary
         data_to_send = {
             "hidden_states": hidden_states_client.cpu(),
-            "presents": presents_client.cpu(),
+            # Use a list comprehension to move each tensor to the CPU
+            "presents": [p.cpu() for p in presents_client],
             "input_shape": input_ids.shape,
             "labels": labels.cpu()
         }

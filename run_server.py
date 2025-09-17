@@ -29,8 +29,10 @@ async def forward_pass(request: Request):
     buffer = io.BytesIO(data_bytes)
     client_data = torch.load(buffer)
     
+    # NEW CODE
     hidden_states_client = client_data["hidden_states"].to(DEVICE)
-    presents_client = client_data["presents"].to(DEVICE)
+    # Use a list comprehension to move each tensor to the server's device
+    presents_client = [p.to(DEVICE) for p in client_data["presents"]]
     input_ids_shape = client_data["input_shape"]
     labels = client_data["labels"].to(DEVICE)
     
