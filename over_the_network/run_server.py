@@ -1,4 +1,4 @@
-# run_server.py
+# pip install fastapi "uvicorn[standard]" torch
 import torch
 import io
 from fastapi import FastAPI, Request, Response
