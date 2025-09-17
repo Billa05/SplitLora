@@ -7,17 +7,16 @@ from torch.utils.data import DataLoader
 from datasets import load_dataset
 from transformers import AutoTokenizer, DataCollatorForLanguageModeling
 from split_gpt2 import GPT2Config, GPT2LMModel_Client
+from transformers import AutoModelForCausalLM
 
 # --- Configuration ---
-# !!! IMPORTANT: Replace with your friend's local IP address !!!
+# !!! IMPORTANT: Replace with your server local IP address !!!
 SERVER_URL = "http://172.30.153.97:8000/forward" 
 
 DEVICE = "cpu"
 EPOCHS = 3
 BATCH_SIZE = 2
 
-# (The data loading part is the same as train_split_lora.py)
-# ... [Copy and paste the entire "Load Dataset and Tokenizer" section here] ...
 print("Step 2: Loading dataset and tokenizer...")
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
 tokenizer.pad_token = tokenizer.eos_token
@@ -37,6 +36,15 @@ print("--> Dataset prepared.")
 print("\nStep 3: Initializing client model...")
 config = GPT2Config(lora_attn_dim=4, lora_attn_alpha=16)
 client_model = GPT2LMModel_Client(config).to(DEVICE)
+# --- NEW: Load Pre-trained GPT-2 Weights ---
+print("Downloading and loading pre-trained GPT-2 weights...")
+pretrained_model = AutoModelForCausalLM.from_pretrained("gpt2")
+state_dict = pretrained_model.state_dict()
+client_model.load_weight(state_dict)
+del pretrained_model # Free up memory
+print("--> Pre-trained weights loaded into client model.")
+# --- End of New Section ---
+
 client_model.train()
 optimizer = AdamW(client_model.parameters(), lr=5e-5)
 print("--> Client model and optimizer ready.")

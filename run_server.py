@@ -4,6 +4,7 @@ import io
 from fastapi import FastAPI, Request, Response
 import uvicorn
 from split_gpt2 import GPT2Config, GPT2LMModel_Server
+from transformers import AutoModelForCausalLM 
 
 # --- Configuration ---
 DEVICE = "cpu"
@@ -14,8 +15,18 @@ PORT = 8000
 print("Initializing server model...")
 config = GPT2Config(lora_attn_dim=4, lora_attn_alpha=16)
 server_model = GPT2LMModel_Server(config).to(DEVICE)
-server_model.eval()  # Set to eval mode, as it's not being trained
-print("--> Server model loaded successfully.")
+# --- NEW: Load Pre-trained GPT-2 Weights ---
+print("Downloading and loading pre-trained GPT-2 weights...")
+# 1. Load the standard, full GPT-2 model to get its weights
+pretrained_model = AutoModelForCausalLM.from_pretrained("gpt2")
+state_dict = pretrained_model.state_dict()
+# 2. Use the custom load_weight function to transfer them
+server_model.load_weight(state_dict)
+del pretrained_model # Free up memory
+print("--> Pre-trained weights loaded into server model.")
+
+server_model.eval()
+print("--> Server model is ready.")
 
 # --- FastAPI App ---
 app = FastAPI()
