@@ -93,4 +93,7 @@ for epoch in range(EPOCHS):
         print("  <== Optimizer step complete.")
 
 print("\nTraining complete!")
-# You can add code here to save the final client model
+OUTPUT_FILE = "final_client_lora_adapter.pt"
+print(f"\nStep 5: Saving final client model state to {OUTPUT_FILE}...")
+torch.save(client_model.state_dict(), OUTPUT_FILE)
+print("--> Client model with trained LoRA adapters saved successfully!")

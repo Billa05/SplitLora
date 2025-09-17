@@ -64,6 +64,36 @@ async def forward_pass(request: Request):
 
     return Response(content=grad_bytes, media_type="application/octet-stream")
 
+@app.post("/generate")
+async def generate_pass(request: Request):
+    print("\n[+] Received a request on /generate")
+    
+    # 1. Deserialize the incoming data
+    data_bytes = await request.body()
+    buffer = io.BytesIO(data_bytes)
+    client_data = torch.load(buffer)
+    
+    hidden_states_client = client_data["hidden_states"].to(DEVICE)
+    presents_client = [p.to(DEVICE) for p in client_data["presents"]]
+    input_ids_shape = client_data["input_shape"]
+    
+    # 2. Run the server model's forward pass to get logits
+    with torch.no_grad():
+        lm_logits, _ = server_model(
+            input_ids_shape=input_ids_shape,
+            hidden_states_client=hidden_states_client,
+            presents_client=presents_client
+        )
+    
+    print(f"--> Returning logits of shape: {lm_logits.shape}")
+
+    # 3. Serialize the logits and send them back
+    logits_buffer = io.BytesIO()
+    torch.save(lm_logits.cpu(), logits_buffer)
+    logits_bytes = logits_buffer.getvalue()
+
+    return Response(content=logits_bytes, media_type="application/octet-stream")
+
 if __name__ == "__main__":
     print(f"Starting server at http://{HOST}:{PORT}")
     uvicorn.run(app, host=HOST, port=PORT)
