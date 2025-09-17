@@ -10,7 +10,7 @@ from split_gpt2 import GPT2Config, GPT2LMModel_Client
 
 # --- Configuration ---
 # !!! IMPORTANT: Replace with your friend's local IP address !!!
-SERVER_URL = "http://192.168.56.1:8000/forward" 
+SERVER_URL = "http://172.30.153.97:8000/forward" 
 
 DEVICE = "cpu"
 EPOCHS = 3
@@ -62,7 +62,6 @@ for epoch in range(EPOCHS):
         # Package all necessary data into a dictionary
         data_to_send = {
             "hidden_states": hidden_states_client.cpu(),
-            # Use a list comprehension to move each tensor to the CPU
             "presents": [p.cpu() for p in presents_client],
             "input_shape": input_ids.shape,
             "labels": labels.cpu()
@@ -77,18 +76,19 @@ for epoch in range(EPOCHS):
         response = requests.post(SERVER_URL, data=payload_bytes, headers={'Content-Type': 'application/octet-stream'})
         
         if response.status_code == 200:
-            # Deserialize the loss received from the server
-            loss_buffer = io.BytesIO(response.content)
-            loss = torch.load(loss_buffer).to(DEVICE)
-            print(f"  <== Received Loss from server: {loss.item():.4f}")
+            # Deserialize the GRADIENT received from the server
+            grad_buffer = io.BytesIO(response.content)
+            received_grad = torch.load(grad_buffer).to(DEVICE)
+            print(f"  <== Received gradient from server with shape: {received_grad.shape}")
         else:
             print(f"  [!] Error from server: {response.status_code}")
             print(response.text)
             continue
 
-        # 3. Backpropagation (on your laptop)
-        print("  3. ==> Performing backpropagation...")
-        loss.backward()
+        # 3. Backpropagation using the received gradient
+        print("  3. ==> Performing backpropagation on client using server's gradient...")
+        # This continues the backward pass on the client's graph
+        hidden_states_client.backward(gradient=received_grad)
         optimizer.step()
         print("  <== Optimizer step complete.")
 
