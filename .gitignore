@@ -3,3 +3,7 @@ __pycache__
 gpt2-split-lora-client.pt
 gpt2-lora-quotes-adapter
 final_client_lora_adapter.pt
+best_waste_detection_obb.pt
+adapter_client_0_final.pth
+adapter_client_1_final.pth
+adapter_client_2_final.pth
