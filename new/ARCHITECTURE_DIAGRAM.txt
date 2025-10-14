@@ -1,0 +1,294 @@
+"""
+DISTRIBUTED GPT-2 PIPELINE ARCHITECTURE DIAGRAM
+================================================
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         TRAINING PIPELINE FLOW                            │
+└──────────────────────────────────────────────────────────────────────────┘
+
+DEVICE 0 (First Device)                    DEVICE 1 (Last Device)
+════════════════════════                   ═══════════════════════
+Port: Connects to 8766                     Port: Listens on 8766
+Has: Training Data                         Has: Loss Computation
+
+
+┌─────────────────────┐
+│   Training Data     │
+│  (batch of tokens)  │
+└──────────┬──────────┘
+           │
+           ▼
+    ┌─────────────┐
+    │ Token Embed │ ◄── Embedding weights (frozen)
+    └──────┬──────┘
+           │
+           ▼
+    ┌─────────────┐
+    │  Pos Embed  │ ◄── Position embeddings (frozen)
+    └──────┬──────┘
+           │
+           ▼
+    ┌─────────────┐
+    │   Layer 0   │ ◄── LoRA params (trainable)
+    └──────┬──────┘
+           │
+    ┌─────────────┐
+    │   Layer 1   │ ◄── LoRA params (trainable)
+    └──────┬──────┘
+           │
+    ┌─────────────┐
+    │   Layer 2   │ ◄── LoRA params (trainable)
+    └──────┬──────┘
+           │
+    ┌─────────────┐
+    │   Layer 3   │ ◄── LoRA params (trainable)
+    └──────┬──────┘
+           │
+    ┌─────────────┐
+    │   Layer 4   │ ◄── LoRA params (trainable)
+    └──────┬──────┘
+           │
+    ┌─────────────┐
+    │   Layer 5   │ ◄── LoRA params (trainable)
+    └──────┬──────┘
+           │
+           │ Hidden States H₁
+           │ + Labels
+           │ + Mask
+           │
+           │ ═══════════════════════════════════════════╗
+           │              WebSocket (8766)              ║
+           │                                            ║
+           │                                            ▼
+           │                                     ┌─────────────┐
+           │                                     │   Layer 6   │ ◄── LoRA params
+           │                                     └──────┬──────┘
+           │                                            │
+           │                                     ┌─────────────┐
+           │                                     │   Layer 7   │ ◄── LoRA params
+           │                                     └──────┬──────┘
+           │                                            │
+           │                                     ┌─────────────┐
+           │                                     │   Layer 8   │ ◄── LoRA params
+           │                                     └──────┬──────┘
+           │                                            │
+           │                                     ┌─────────────┐
+           │                                     │   Layer 9   │ ◄── LoRA params
+           │                                     └──────┬──────┘
+           │                                            │
+           │                                     ┌─────────────┐
+           │                                     │  Layer 10   │ ◄── LoRA params
+           │                                     └──────┬──────┘
+           │                                            │
+           │                                     ┌─────────────┐
+           │                                     │  Layer 11   │ ◄── LoRA params
+           │                                     └──────┬──────┘
+           │                                            │
+           │                                            ▼
+           │                                     ┌─────────────┐
+           │                                     │  LayerNorm  │
+           │                                     └──────┬──────┘
+           │                                            │
+           │                                            ▼
+           │                                     ┌─────────────┐
+           │                                     │   LM Head   │
+           │                                     └──────┬──────┘
+           │                                            │
+           │                                            ▼
+           │                                     ┌─────────────┐
+           │                                     │   Logits    │
+           │                                     └──────┬──────┘
+           │                                            │
+           │                                            ▼
+           │                                  ┌──────────────────┐
+           │                                  │ CrossEntropyLoss │
+           │                                  │  (with masking)  │
+           │                                  └────────┬─────────┘
+           │                                           │
+           │                                           ▼
+           │                                    ┌─────────────┐
+           │                                    │    Loss     │
+           │                                    └──────┬──────┘
+           │                                           │
+           │                                           │ .backward()
+           │                                           │
+           │                                           ▼
+           │                                  ┌─────────────────┐
+           │                                  │ Update LoRA     │
+           │                                  │ (Layers 6-11)   │
+           │                                  └─────────────────┘
+           │                                           │
+           │ ◄═════════════════════════════════════════╝
+           │              Gradient ∂L/∂H₁
+           │           WebSocket (8766)
+           │
+           │ .backward(gradient)
+           │
+           ▼
+    ┌─────────────────┐
+    │  Update LoRA    │
+    │  (Layers 0-5)   │
+    └─────────────────┘
+
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         LORA ADAPTER STRUCTURE                            │
+└──────────────────────────────────────────────────────────────────────────┘
+
+For each transformer layer's attention:
+
+    Input x
+      │
+      ▼
+    ┌─────────────────────────────────────────┐
+    │  Base Conv1D (FROZEN)                   │
+    │  Output: x @ W_base                     │
+    └──────────────┬──────────────────────────┘
+                   │
+                   ├──────────────────┐
+                   │                  │
+                   ▼                  ▼
+            Base Output        ┌────────────────┐
+                   │           │  LoRA Branch   │
+                   │           │                │
+                   │           │  Dropout(x)    │
+                   │           │       ↓        │
+                   │           │  x @ A         │
+                   │           │       ↓        │
+                   │           │  result @ B    │
+                   │           │       ↓        │
+                   │           │  * scaling     │
+                   │           │  (α/r)         │
+                   │           └────────┬───────┘
+                   │                    │
+                   └────────+───────────┘
+                            │
+                            ▼
+                    Final Output
+                    (base + LoRA)
+
+Where:
+  - A: Low-rank matrix (in_features × r)
+  - B: Low-rank matrix (r × out_features)
+  - r: LoRA rank (default: 8)
+  - α: LoRA alpha (default: 16)
+  - scaling: α/r = 2.0
+
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│                      COMMUNICATION PROTOCOL                               │
+└──────────────────────────────────────────────────────────────────────────┘
+
+Step 1: Device 0 → Device 1 (Forward Pass)
+═════════════════════════════════════════
+Message 1: Hidden states tensor (serialized with torch.save)
+Message 2: Labels tensor (serialized with torch.save)
+Message 3: Mask tensor (serialized with torch.save)
+
+Step 2: Device 1 Processing
+════════════════════════════
+- Forward through layers 6-11
+- Compute loss with masking
+- Backward through layers 6-11
+- Update LoRA parameters
+
+Step 3: Device 1 → Device 0 (Backward Pass)
+═══════════════════════════════════════════
+Message 1: Gradient tensor ∂L/∂H₁ (serialized with torch.save)
+
+Step 4: Device 0 Processing
+════════════════════════════
+- Backward through layers 0-5 using received gradient
+- Update LoRA parameters
+
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         MEMORY EFFICIENCY                                 │
+└──────────────────────────────────────────────────────────────────────────┘
+
+Base GPT-2 Parameters:      ~124M (all frozen, shared)
+LoRA Parameters per device: ~294K (trainable)
+
+Memory Savings:
+✓ Only LoRA parameters need gradients
+✓ Base model weights are frozen
+✓ Each device only holds 6 layers + embeddings/head
+✓ Reduces memory by ~50% compared to full model on one device
+
+Parameter Breakdown (per layer):
+- Base transformer: ~7.4M parameters (frozen)
+- LoRA A matrix: 768 × 8 = 6,144 parameters
+- LoRA B matrix: 8 × 768 = 6,144 parameters
+- LoRA per c_attn: 12,288 parameters
+- LoRA per c_proj: 12,288 parameters
+- Total LoRA per layer: ~24,576 parameters
+
+Total Trainable: ~294K parameters (0.2% of full model)
+
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         LOSS MASKING STRATEGY                             │
+└──────────────────────────────────────────────────────────────────────────┘
+
+Input Sequence:  [context_tokens | completion_tokens | padding]
+Target Sequence: [context_tokens | completion_tokens | padding] (shifted by 1)
+Mask:            [     0.0       |       1.0         |   0.0  ]
+
+Example:
+Input:  [The, cat, sat, on, the, mat, <PAD>, <PAD>]
+Target: [cat, sat, on, the, mat, <PAD>, <PAD>, <PAD>]
+Mask:   [0.0, 0.0, 1.0, 1.0, 1.0, 1.0,  0.0,   0.0 ]
+         └─ context ─┘ └─── completion ───┘ └─ pad ─┘
+
+Loss Calculation:
+loss = CrossEntropyLoss(logits, target) * mask
+loss = loss.sum() / mask.sum()  # Average only over completion tokens
+
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         STARTUP SEQUENCE                                  │
+└──────────────────────────────────────────────────────────────────────────┘
+
+1. run_pipeline.sh starts
+2. Kill existing processes on ports 8765, 8766
+3. Start Device 1 in background
+   - Loads GPT-2 layers 6-11
+   - Applies LoRA adapters
+   - Creates optimizer
+   - Starts WebSocket server on 8766
+   - Waits for connection
+4. Wait 2 seconds
+5. Start Device 0 in background
+   - Loads GPT-2 layers 0-5 + embeddings
+   - Applies LoRA adapters
+   - Creates optimizer
+   - Loads training data
+   - Connects to Device 1 on 8766
+6. Training begins
+   - Device 0 drives the loop
+   - Processes 2000 steps
+   - Both devices update their LoRA parameters
+7. Device 0 finishes, closes connection
+8. Device 1 detects closure, saves adapters
+9. Both devices save LoRA weights
+10. Script collects saved files
+
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│                            KEY FILES                                      │
+└──────────────────────────────────────────────────────────────────────────┘
+
+splitmodel.py      - Model architecture and LoRA implementation
+ws_client.py       - Distributed training coordination
+optimizer.py       - AdamW optimizer and schedulers
+data_utils.py      - Data loading and preprocessing
+ws_utils.py        - WebSocket communication utilities
+infer_2device.py   - Inference script for generation
+run_pipeline.sh    - Training orchestration script
+
+Output Files:
+lora_device_0.pth  - Trained LoRA weights for Device 0
+lora_device_1.pth  - Trained LoRA weights for Device 1
+device_0.log       - Training logs for Device 0
+device_1.log       - Training logs for Device 1
+"""
