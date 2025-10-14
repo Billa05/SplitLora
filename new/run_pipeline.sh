@@ -10,17 +10,18 @@ echo ""
 # Kill any existing processes on the ports
 echo "Cleaning up existing processes..."
 lsof -ti:8765 | xargs kill -9 2>/dev/null || true
+lsof -ti:8766 | xargs kill -9 2>/dev/null || true
 sleep 1
 
 # Start devices in reverse order (last to first)
-# Device 1 must start first (it listens on 8765)
-echo "Starting Device 1 (layers 6-11 + LM Head, listening on 8765)..."
+# Device 1 must start first (it listens on 8766)
+echo "Starting Device 1 (layers 6-11 + LM Head, listening on 8766)..."
 python ws_client.py --device_id 1 > device_1.log 2>&1 &
 DEVICE_1_PID=$!
 sleep 2
 
-# Device 0 starts last (connects to 8765, has the data)
-echo "Starting Device 0 (embeddings + layers 0-5, connecting to 8765)..."
+# Device 0 starts last (connects to 8766, has the data)
+echo "Starting Device 0 (embeddings + layers 0-5, connecting to 8766)..."
 python ws_client.py --device_id 0 > device_0.log 2>&1 &
 DEVICE_0_PID=$!
 

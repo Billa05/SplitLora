@@ -1,16 +1,20 @@
 """
 Split GPT-2 model for distributed training with LoRA adapters.
+CORRECTED VERSION: Only processes assigned layers, not the entire model.
 """
 
 import torch
 from torch import nn
 from transformers import GPT2LMHeadModel
-from peft import get_peft_model, LoraConfig
+from peft import LoraConfig
 
 
 class GPT2SplitPart(nn.Module):
     """
     Split part of GPT-2 model for distributed training.
+    
+    This implementation only processes the layers assigned to this device,
+    not the entire model.
     
     Args:
         config: GPT2Config object
@@ -27,78 +31,157 @@ class GPT2SplitPart(nn.Module):
         self.end_layer = end_layer
         self.has_embeddings = has_embeddings
         self.has_lm_head = has_lm_head
+        self.config = config
         
-        # Load pretrained GPT-2 model
-        self.base_model = GPT2LMHeadModel.from_pretrained('gpt2')
-        self.base_model.config = config
+        # Load pretrained GPT-2 model to extract components
+        print(f"Loading GPT-2 components for layers {start_layer}-{end_layer}...")
+        full_model = GPT2LMHeadModel.from_pretrained('gpt2')
         
-        # Freeze all parameters initially
-        for param in self.base_model.parameters():
-            param.requires_grad = False
-        
-        # Unfreeze only the layers in this part
+        # Extract only the components we need
         if has_embeddings:
-            for param in self.base_model.transformer.wte.parameters():
-                param.requires_grad = True
-            for param in self.base_model.transformer.wpe.parameters():
-                param.requires_grad = True
+            self.wte = full_model.transformer.wte  # Token embeddings
+            self.wpe = full_model.transformer.wpe  # Position embeddings
+            self.drop = full_model.transformer.drop  # Dropout
+            print(f"  - Loaded embeddings")
         
-        for i in range(start_layer, end_layer):
-            for param in self.base_model.transformer.h[i].parameters():
-                param.requires_grad = True
+        # Extract only assigned transformer layers
+        self.h = nn.ModuleList([
+            full_model.transformer.h[i] for i in range(start_layer, end_layer)
+        ])
+        print(f"  - Loaded {len(self.h)} transformer layers")
         
         if has_lm_head:
-            for param in self.base_model.transformer.ln_f.parameters():
-                param.requires_grad = True
-            for param in self.base_model.lm_head.parameters():
-                param.requires_grad = True
+            self.ln_f = full_model.transformer.ln_f  # Final layer norm
+            self.lm_head = full_model.lm_head  # Language model head
+            print(f"  - Loaded LM head")
         
-        # Apply LoRA to trainable parts
+        # Delete full model to free memory
+        del full_model
+        
+        # Apply LoRA to the extracted layers
         if lora_config:
-            self.base_model = get_peft_model(self.base_model, lora_config)
+            print(f"  - Applying LoRA (r={lora_config.r}, alpha={lora_config.lora_alpha})...")
+            for i, layer in enumerate(self.h):
+                # Apply LoRA to attention projections
+                layer.attn.c_attn = self._wrap_with_lora(
+                    layer.attn.c_attn, lora_config
+                )
+                layer.attn.c_proj = self._wrap_with_lora(
+                    layer.attn.c_proj, lora_config
+                )
+            print(f"  - LoRA applied to {len(self.h)} layers")
     
-    def forward(self, input_ids=None, hidden_states=None, past_key_values=None, labels=None, **kwargs):
+    def _wrap_with_lora(self, conv1d_layer, lora_config):
+        """Wrap a Conv1D layer with LoRA adaptation."""
+        import torch.nn.functional as F
+        
+        class LoRAConv1D(nn.Module):
+            def __init__(self, base_layer, r, alpha, dropout):
+                super().__init__()
+                self.base_layer = base_layer
+                self.r = r
+                self.alpha = alpha
+                self.scaling = alpha / r
+                
+                # Freeze base layer
+                for param in self.base_layer.parameters():
+                    param.requires_grad = False
+                
+                # GPT-2's Conv1D has weight shape (nx, nf) where nx=in_features, nf=out_features
+                # Get dimensions from the Conv1D layer
+                nx = base_layer.weight.shape[0]  # input features
+                nf = base_layer.weight.shape[1]  # output features
+                
+                # LoRA parameters
+                self.lora_A = nn.Parameter(torch.randn(nx, r) * 0.01)
+                self.lora_B = nn.Parameter(torch.zeros(r, nf))
+                self.lora_dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+            
+            def forward(self, x):
+                # Base output (Conv1D applies: x @ weight + bias)
+                result = self.base_layer(x)
+                # LoRA adaptation
+                lora_out = self.lora_dropout(x) @ self.lora_A @ self.lora_B * self.scaling
+                return result + lora_out
+        
+        return LoRAConv1D(
+            conv1d_layer, 
+            lora_config.r, 
+            lora_config.lora_alpha, 
+            lora_config.lora_dropout
+        )
+    
+    def forward(self, input_ids=None, hidden_states=None, attention_mask=None, labels=None, mask=None, **kwargs):
         """
-        Forward pass through this device's portion of the model.
+        Forward pass through ONLY this device's portion of the model.
         
         Args:
             input_ids: Input token IDs (for first device with embeddings)
             hidden_states: Hidden states from previous device
-            past_key_values: Cached key-value pairs for generation
+            attention_mask: Attention mask
             labels: Target labels for loss computation
+            mask: Loss mask to ignore padding tokens
             
         Returns:
             Tuple of (output, auxiliary_info)
         """
+        # First device: embed tokens
         if self.has_embeddings:
-            # First part: process from input_ids
-            outputs = self.base_model(
-                input_ids=input_ids, 
-                past_key_values=past_key_values, 
-                output_hidden_states=True, 
-                **kwargs
-            )
-            return outputs.hidden_states[-1], outputs.past_key_values
+            if input_ids is None:
+                raise ValueError("input_ids must be provided for first device")
             
-        elif self.has_lm_head:
-            # Last part: process hidden_states to logits
-            outputs = self.base_model(
-                inputs_embeds=hidden_states, 
-                past_key_values=past_key_values, 
-                labels=labels, 
-                **kwargs
-            )
-            return outputs.logits, outputs.loss
+            # Token embeddings
+            inputs_embeds = self.wte(input_ids)
             
-        else:
-            # Middle part: process hidden_states
-            outputs = self.base_model(
-                inputs_embeds=hidden_states, 
-                past_key_values=past_key_values, 
-                output_hidden_states=True, 
-                **kwargs
-            )
-            return outputs.hidden_states[-1], outputs.past_key_values
+            # Position embeddings
+            seq_length = input_ids.size(1)
+            position_ids = torch.arange(0, seq_length, dtype=torch.long, device=input_ids.device)
+            position_ids = position_ids.unsqueeze(0).expand_as(input_ids)
+            position_embeds = self.wpe(position_ids)
+            
+            hidden_states = inputs_embeds + position_embeds
+            hidden_states = self.drop(hidden_states)
+        
+        if hidden_states is None:
+            raise ValueError("Either input_ids or hidden_states must be provided")
+        
+        # Process through ONLY assigned layers
+        for i, layer in enumerate(self.h):
+            actual_layer_idx = self.start_layer + i
+            # Each layer returns (hidden_states, present_key_value, attention_weights)
+            layer_outputs = layer(hidden_states, attention_mask=attention_mask)
+            hidden_states = layer_outputs[0]
+        
+        # Last device: compute logits and loss
+        if self.has_lm_head:
+            hidden_states = self.ln_f(hidden_states)
+            logits = self.lm_head(hidden_states)
+            
+            loss = None
+            if labels is not None:
+                # Shift for causal LM: predict next token
+                shift_logits = logits[..., :-1, :].contiguous()
+                shift_labels = labels[..., 1:].contiguous()
+                
+                # Calculate loss with optional masking
+                loss_fct = nn.CrossEntropyLoss(reduction='none')
+                loss = loss_fct(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1)
+                )
+                
+                # Apply mask if provided to ignore padding
+                if mask is not None:
+                    shift_mask = mask[..., 1:].contiguous()
+                    loss = loss * shift_mask.view(-1)
+                    loss = loss.sum() / (shift_mask.sum() + 1e-8)
+                else:
+                    loss = loss.mean()
+            
+            return logits, loss
+        
+        # Middle/first device: return hidden states
+        return hidden_states, None
 
 
 def get_lora_config(r=8, alpha=16, dropout=0.0):

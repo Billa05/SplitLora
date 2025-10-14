@@ -6,7 +6,6 @@ import argparse
 from typing import Dict
 
 import torch
-import loralib as lora
 import websockets
 from torch.utils.data import DataLoader
 from transformers import GPT2Config
@@ -44,7 +43,7 @@ class ClientArgs:
 
 
 CONFIG = {
-    "valid_data_path": "./data/e2e/train.jsonl",
+    "train_data_path": "./data/e2e/train.jsonl",
 }
 
 
@@ -103,7 +102,7 @@ async def client_main(device_id):
     optimizer = create_adam_optimizer_from_args(model_part, args)
 
     if device_id == 0:
-        train_data = FT_Dataset(CONFIG["valid_data_path"], args.train_batch_size, args.seq_len)
+        train_data = FT_Dataset(CONFIG["train_data_path"], args.train_batch_size, args.seq_len)
         train_loader = DataLoader(train_data, batch_size=args.train_batch_size, drop_last=True)
     else:
         train_loader = None
@@ -132,9 +131,9 @@ async def client_main(device_id):
                         
                         # Process through this device's layers
                         if has_lm_head:
-                            # Last device: compute loss
-                            logits, loss = model_part(hidden_states=hidden_states, labels=lm_labels)
-                            loss = loss.mean()
+                            # Last device: compute loss with mask
+                            logits, loss = model_part(hidden_states=hidden_states, labels=lm_labels, mask=lm_mask)
+                            # loss already computed with mask in the model
                             loss.backward()
                             logger.info(f"Device {device_id}: Loss = {loss.item():.4f}")
                             

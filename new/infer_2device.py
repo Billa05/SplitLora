@@ -1,5 +1,6 @@
 """
 Simple inference script for 2-device pipeline with trained LoRA adapters.
+CORRECTED VERSION: Uses proper layer-wise split model.
 Usage: python infer_2device.py --prompt "Your text here"
 """
 
@@ -25,13 +26,19 @@ def generate_text(prompt, max_length=50, temperature=1.0, top_k=50):
     lora_config = get_lora_config(r=8, alpha=16, dropout=0.0)
     
     model_0 = GPT2SplitPart(config, 0, 6, has_embeddings=True, has_lm_head=False, lora_config=lora_config).to(device)
-    model_0.load_state_dict(torch.load("./lora_device_0.pth", map_location=device))
+    
+    # Load saved state dict
+    state_dict_0 = torch.load("./lora_device_0.pth", map_location=device)
+    model_0.load_state_dict(state_dict_0, strict=False)
     model_0.eval()
     
     # Load Device 1 model (layers 6-11 + LM head)
     print("Loading Device 1 (layers 6-11 + LM head)...")
     model_1 = GPT2SplitPart(config, 6, 12, has_embeddings=False, has_lm_head=True, lora_config=lora_config).to(device)
-    model_1.load_state_dict(torch.load("./lora_device_1.pth", map_location=device))
+    
+    # Load saved state dict
+    state_dict_1 = torch.load("./lora_device_1.pth", map_location=device)
+    model_1.load_state_dict(state_dict_1, strict=False)
     model_1.eval()
     
     # Tokenize input
