@@ -10,8 +10,8 @@ from splitmodel import GPT2SplitPart, get_lora_config
 import argparse
 
 
-def generate_text(prompt, max_length=50, temperature=1.0, top_k=50):
-    """Generate text using the 2-device pipeline."""
+def generate_text(prompt, max_length=50, temperature=0.8, top_k=40, top_p=0.9, repetition_penalty=1.2):
+    """Generate text using the 2-device pipeline with improved decoding."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}\n")
     
@@ -23,7 +23,7 @@ def generate_text(prompt, max_length=50, temperature=1.0, top_k=50):
     # Load Device 0 model (embeddings + layers 0-5)
     print("Loading Device 0 (embeddings + layers 0-5)...")
     config = GPT2Config()
-    lora_config = get_lora_config(r=8, alpha=16, dropout=0.0)
+    lora_config = get_lora_config(r=16, alpha=16, dropout=0.0)
     
     model_0 = GPT2SplitPart(config, 0, 6, has_embeddings=True, has_lm_head=False, lora_config=lora_config).to(device)
     
@@ -43,6 +43,7 @@ def generate_text(prompt, max_length=50, temperature=1.0, top_k=50):
     
     # Tokenize input
     input_ids = tokenizer.encode(prompt, return_tensors='pt').to(device)
+    prompt_length = input_ids.shape[1]
     
     print(f"\nPrompt: {prompt}")
     print(f"Generating {max_length} tokens...\n")
@@ -50,20 +51,35 @@ def generate_text(prompt, max_length=50, temperature=1.0, top_k=50):
     generated = input_ids
     
     with torch.no_grad():
-        for _ in range(max_length):
+        for step in range(max_length):
             # Forward through Device 0
             hidden_states, _ = model_0(input_ids=generated)
             
             # Forward through Device 1
             logits, _ = model_1(hidden_states=hidden_states)
             
-            # Get next token
+            # Get next token logits
             next_token_logits = logits[:, -1, :] / temperature
+            
+            # Apply repetition penalty
+            if repetition_penalty != 1.0:
+                for token_id in set(generated[0].tolist()):
+                    next_token_logits[0, token_id] /= repetition_penalty
             
             # Apply top-k filtering
             if top_k > 0:
                 indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1, None]
                 next_token_logits[indices_to_remove] = float('-inf')
+            
+            # Apply top-p (nucleus) filtering
+            if top_p < 1.0:
+                sorted_logits, sorted_indices = torch.sort(next_token_logits, descending=True)
+                cumulative_probs = torch.cumsum(torch.nn.functional.softmax(sorted_logits, dim=-1), dim=-1)
+                sorted_indices_to_remove = cumulative_probs > top_p
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+                indices_to_remove = sorted_indices[sorted_indices_to_remove]
+                next_token_logits[0, indices_to_remove] = float('-inf')
             
             # Sample from the filtered distribution
             probs = torch.nn.functional.softmax(next_token_logits, dim=-1)
@@ -72,7 +88,7 @@ def generate_text(prompt, max_length=50, temperature=1.0, top_k=50):
             # Append to generated sequence
             generated = torch.cat([generated, next_token], dim=1)
             
-            # Stop if EOS token is generated
+            # Stop if EOS token is generated or we hit the separator
             if next_token.item() == tokenizer.eos_token_id:
                 break
     
@@ -85,8 +101,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Text generation with 2-device LoRA pipeline")
     parser.add_argument("--prompt", type=str, required=True, help="Text prompt for generation")
     parser.add_argument("--max_length", type=int, default=50, help="Maximum tokens to generate (default: 50)")
-    parser.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature (default: 1.0)")
-    parser.add_argument("--top_k", type=int, default=50, help="Top-k filtering (default: 50)")
+    parser.add_argument("--temperature", type=float, default=0.8, help="Sampling temperature (default: 0.8)")
+    parser.add_argument("--top_k", type=int, default=40, help="Top-k filtering (default: 40)")
+    parser.add_argument("--top_p", type=float, default=0.9, help="Top-p (nucleus) filtering (default: 0.9)")
+    parser.add_argument("--repetition_penalty", type=float, default=1.2, help="Repetition penalty (default: 1.2)")
     
     args = parser.parse_args()
     
@@ -94,7 +112,9 @@ if __name__ == "__main__":
         args.prompt, 
         args.max_length, 
         args.temperature, 
-        args.top_k
+        args.top_k,
+        args.top_p,
+        args.repetition_penalty
     )
     
     print(f"Generated text:\n{generated}\n")
