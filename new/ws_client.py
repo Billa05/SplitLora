@@ -15,7 +15,6 @@ from splitmodel import GPT2SplitPart, get_lora_config
 from optimizer import create_adam_optimizer_from_args
 from ws_utils import send_json, recv_json, send_bytes, recv_bytes, state_dict_to_bytes
 
-
 class ClientArgs:
     random_seed: int = 42
     fp16: bool = False
