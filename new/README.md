@@ -126,13 +126,13 @@ You can run training manually or via script. Need 2 terminals/devices.
 #### Option 2: Manual Training (For Custom Control)
 1. **Terminal 1 (Device 1 - Server)**:
    ```bash
-   python ws_client.py --client_id 1
+   python ws_client.py --device_id 1
    ```
    - Runs as server, waits for Device 0.
 
 2. **Terminal 2 (Device 0 - Client with Data)**:
    ```bash
-   python ws_client.py --client_id 0
+   python ws_client.py --device_id 0
    ```
    - Loads data, trains, communicates with Device 1.
 
