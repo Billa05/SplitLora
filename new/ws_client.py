@@ -25,55 +25,25 @@ class ClientArgs:
     train_batch_size: int = 4
     seq_len: int = 128
     model_card: str = "gpt2"
-    max_step: int = 10000
+    num_epochs: int = 4  # Increased from 6 to 10 epochs for better convergence
     device_id: int = 0
-    num_devices: int = 2  # Changed to 2 devices
+    num_devices: int = 2 
     
     # Optimizer attributes
-    lr: float = 0.0001  # Increased 10x from 1e-5 to 1e-4 for LoRA
+    lr: float = 0.0003  # Increased to 3e-4 for faster convergence with LoRA
     weight_decay: float = 0.01
     correct_bias: bool = False
     adam_epislon: float = 1e-6
     no_decay_bias: bool = False
     adam_beta1: float = 0.9
-    adam_beta2: float = 0.98
+    adam_beta2: float = 0.999  # Changed from 0.98 to 0.999 (more standard)
     scheduler: str = "linear"
-    warmup_step: int = 500  # Add warmup for stability
+    warmup_step: int = 500  # Warmup for stability
 
 
 CONFIG = {
     "train_data_path": "./data/e2e/train.jsonl",
 }
-
-
-def build_config(model_card: str, args: ClientArgs) -> GPT2Config:
-    if model_card == "gpt2.sm":
-        return GPT2Config(
-            n_embd=768,
-            n_layer=12,
-            n_head=12,
-            lora_attn_dim=args.lora_dim,
-            lora_attn_alpha=args.lora_alpha,
-            lora_dropout=args.lora_dropout,
-        )
-    if model_card == "gpt2.md":
-        return GPT2Config(
-            n_embd=1024,
-            n_layer=24,
-            n_head=16,
-            lora_attn_dim=args.lora_dim,
-            lora_attn_alpha=args.lora_alpha,
-            lora_dropout=args.lora_dropout,
-        )
-    return GPT2Config(
-        n_embd=1280,
-        n_layer=36,
-        n_head=20,
-        lora_attn_dim=args.lora_dim,
-        lora_attn_alpha=args.lora_alpha,
-        lora_dropout=args.lora_dropout,
-    )
-
 
 async def client_main(device_id):
     logging.basicConfig(
@@ -112,7 +82,7 @@ async def client_main(device_id):
     logger.info(f"  - Has LM head: {has_lm_head}")
     logger.info(f"  - LoRA rank: {args.lora_dim}, alpha: {args.lora_alpha}")
     logger.info(f"  - Batch size: {args.train_batch_size}, seq_len: {args.seq_len}")
-    logger.info(f"  - Max steps: {args.max_step}")
+    logger.info(f"  - Number of epochs: {args.num_epochs}")
     logger.info(f"  - Learning rate: {args.lr}")
     if listen_port:
         logger.info(f"  - Listen port: {listen_port}")
@@ -131,13 +101,25 @@ async def client_main(device_id):
     total_params = sum(p.numel() for p in model_part.parameters())
     trainable_params = sum(p.numel() for p in model_part.parameters() if p.requires_grad)
     logger.info(f"Model parameters: {total_params:,} total, {trainable_params:,} trainable")
-
+    
+    # Create learning rate scheduler
+    from optimizer import create_optimizer_scheduler
     if device_id == 0:
-        logger.info("Loading training data...")
         train_data = FT_Dataset(CONFIG["train_data_path"], args.train_batch_size, args.seq_len)
         train_loader = DataLoader(train_data, batch_size=args.train_batch_size, drop_last=True)
-        logger.info(f"Loaded {len(train_data)} training examples, {len(train_loader)} batches")
+        num_batches = len(train_loader)
+        args.max_step = args.num_epochs * num_batches
+        logger.info(f"Total training steps: {args.max_step}")
     else:
+        args.max_step = 10000  # Dummy value for non-first devices
+    
+    scheduler = create_optimizer_scheduler(optimizer, args)
+    if scheduler:
+        logger.info(f"✓ Learning rate scheduler created: {args.scheduler}")
+    else:
+        logger.info("No learning rate scheduler (using constant LR)")
+
+    if device_id != 0:
         train_loader = None
         logger.info("No training data (waiting for upstream device)")
 
@@ -187,10 +169,17 @@ async def client_main(device_id):
                             torch.save(hidden_states.grad.detach().cpu(), buf)
                             await send_bytes(ws, buf.getvalue())
                             
+                            # Gradient clipping
+                            torch.nn.utils.clip_grad_norm_(model_part.parameters(), max_norm=1.0)
+                            
                             # Update local LoRA parameters
                             logger.debug(f"[Step {step_count}] Updating LoRA parameters...")
                             optimizer.step()
                             optimizer.zero_grad()
+                            
+                            # Step scheduler if available
+                            if scheduler:
+                                scheduler.step()
                             
                             if step_count % 100 == 0:
                                 logger.info(f"Processed {step_count} steps so far")
@@ -212,10 +201,17 @@ async def client_main(device_id):
                             grad = torch.load(io.BytesIO(grad_bytes), map_location=device)
                             hidden_states.backward(grad)
                             
+                            # Gradient clipping
+                            torch.nn.utils.clip_grad_norm_(model_part.parameters(), max_norm=1.0)
+                            
                             # Update local LoRA parameters
                             logger.debug(f"[Step {step_count}] Updating LoRA parameters...")
                             optimizer.step()
                             optimizer.zero_grad()
+                            
+                            # Step scheduler if available
+                            if scheduler:
+                                scheduler.step()
                             
                             # Send gradient back to previous device
                             logger.debug(f"[Step {step_count}] Sending gradients to Device {device_id-1}...")
@@ -259,60 +255,96 @@ async def client_main(device_id):
         start_time = time.time()
         loss_history = []
         
-        for batch in train_loader:
-            if train_step >= args.max_step:
-                break
+        num_batches_per_epoch = len(train_loader)
+        total_steps = args.num_epochs * num_batches_per_epoch
+        logger.info(f"Training for {args.num_epochs} epochs × {num_batches_per_epoch} batches = {total_steps} total steps")
+        
+        # Loop through dataset for specified number of epochs
+        for epoch in range(1, args.num_epochs + 1):
+            epoch_start_time = time.time()
+            epoch_start_step = train_step
+            logger.info(f"{'='*70}")
+            logger.info(f"Starting Epoch {epoch}/{args.num_epochs} (Step {train_step}/{total_steps})")
+            logger.info(f"{'='*70}")
             
-            batch = {k: v.to(device) for k, v in batch.items()}
-            _input = batch["input"]
-            _target = batch["target"]
-            _mask = batch["mask"]
-            
-            step_start = time.time()
-            
-            # Forward pass through Device 0's layers
-            logger.debug(f"[Step {train_step+1}] Forward pass through layers {start_layer}-{end_layer-1}...")
-            hidden_states, _ = model_part(input_ids=_input)
-            hidden_states.retain_grad()
-            
-            # Send hidden states, target, mask to next device
-            logger.debug(f"[Step {train_step+1}] Sending to Device {device_id+1}...")
-            logger.debug(f"[Step {train_step+1}] Hidden states shape: {hidden_states.shape}, Input shape: {_input.shape}")
-            buf = io.BytesIO(); torch.save(hidden_states.detach().cpu(), buf); await send_bytes(next_ws, buf.getvalue())
-            buf = io.BytesIO(); torch.save(_target.detach().cpu(), buf); await send_bytes(next_ws, buf.getvalue())
-            buf = io.BytesIO(); torch.save(_mask.detach().cpu(), buf); await send_bytes(next_ws, buf.getvalue())
-            
-            # Receive gradient from next device
-            logger.debug(f"[Step {train_step+1}] Receiving gradients from Device {device_id+1}...")
-            grad_bytes = await recv_bytes(next_ws)
-            grad = torch.load(io.BytesIO(grad_bytes), map_location=device)
-            hidden_states.backward(grad)
-            
-            # Update local LoRA parameters
-            logger.debug(f"[Step {train_step+1}] Updating LoRA parameters...")
-            optimizer.step()
-            optimizer.zero_grad()
-            
-            train_step += 1
-            step_time = time.time() - step_start
-            
-            # Periodic detailed logging
-            if train_step % 10 == 0:
-                elapsed = time.time() - start_time
-                steps_per_sec = train_step / elapsed
-                eta_seconds = (args.max_step - train_step) / steps_per_sec if steps_per_sec > 0 else 0
-                eta_mins = eta_seconds / 60
+            for batch_idx, batch in enumerate(train_loader, 1):
+                batch = {k: v.to(device) for k, v in batch.items()}
+                _input = batch["input"]
+                _target = batch["target"]
+                _mask = batch["mask"]
                 
-                logger.info(f"Step {train_step}/{args.max_step} | "
-                          f"Time: {step_time:.3f}s | "
-                          f"Speed: {steps_per_sec:.2f} steps/s | "
-                          f"ETA: {eta_mins:.1f}min")
-            elif train_step % 100 == 0:
-                logger.info(f"Progress: {train_step}/{args.max_step} steps completed")
+                step_start = time.time()
+                
+                # Forward pass through Device 0's layers
+                logger.debug(f"[Step {train_step+1}] Forward pass through layers {start_layer}-{end_layer-1}...")
+                hidden_states, _ = model_part(input_ids=_input)
+                hidden_states.retain_grad()
+                
+                # Send hidden states, target, mask to next device
+                logger.debug(f"[Step {train_step+1}] Sending to Device {device_id+1}...")
+                logger.debug(f"[Step {train_step+1}] Hidden states shape: {hidden_states.shape}, Input shape: {_input.shape}")
+                buf = io.BytesIO(); torch.save(hidden_states.detach().cpu(), buf); await send_bytes(next_ws, buf.getvalue())
+                buf = io.BytesIO(); torch.save(_target.detach().cpu(), buf); await send_bytes(next_ws, buf.getvalue())
+                buf = io.BytesIO(); torch.save(_mask.detach().cpu(), buf); await send_bytes(next_ws, buf.getvalue())
+                
+                # Receive gradient from next device
+                logger.debug(f"[Step {train_step+1}] Receiving gradients from Device {device_id+1}...")
+                grad_bytes = await recv_bytes(next_ws)
+                grad = torch.load(io.BytesIO(grad_bytes), map_location=device)
+                hidden_states.backward(grad)
+                
+                # Gradient clipping
+                torch.nn.utils.clip_grad_norm_(model_part.parameters(), max_norm=1.0)
+                
+                # Update local LoRA parameters
+                logger.debug(f"[Step {train_step+1}] Updating LoRA parameters...")
+                optimizer.step()
+                optimizer.zero_grad()
+                
+                # Step scheduler
+                if scheduler:
+                    scheduler.step()
+                
+                train_step += 1
+                step_time = time.time() - step_start
+                
+                # Periodic detailed logging
+                if train_step % 100 == 0:
+                    elapsed = time.time() - start_time
+                    steps_per_sec = train_step / elapsed
+                    remaining_steps = total_steps - train_step
+                    eta_seconds = remaining_steps / steps_per_sec if steps_per_sec > 0 else 0
+                    eta_mins = eta_seconds / 60
+                    
+                    # Get current learning rate
+                    current_lr = optimizer.param_groups[0]['lr']
+                    
+                    logger.info(f"Epoch {epoch}/{args.num_epochs} | "
+                              f"Batch {batch_idx}/{num_batches_per_epoch} | "
+                              f"Step {train_step}/{total_steps} | "
+                              f"LR: {current_lr:.2e} | "
+                              f"Time: {step_time:.3f}s | "
+                              f"Speed: {steps_per_sec:.2f} steps/s | "
+                              f"ETA: {eta_mins:.1f}min")
+                elif train_step % 500 == 0:
+                    current_lr = optimizer.param_groups[0]['lr']
+                    logger.info(f"Progress: Epoch {epoch}/{args.num_epochs}, Step {train_step}/{total_steps}, LR: {current_lr:.2e}")
+            
+            # Epoch summary
+            epoch_time = time.time() - epoch_start_time
+            epoch_steps = train_step - epoch_start_step
+            logger.info(f"{'='*70}")
+            logger.info(f"Epoch {epoch}/{args.num_epochs} Complete | "
+                      f"Steps: {epoch_steps} | "
+                      f"Time: {epoch_time/60:.2f}min | "
+                      f"Speed: {epoch_steps/epoch_time:.2f} steps/s")
+            logger.info(f"{'='*70}")
         
         elapsed_total = time.time() - start_time
         logger.info("="*70)
         logger.info(f"TRAINING COMPLETE")
+        logger.info(f"Total epochs: {args.num_epochs}")
+        logger.info(f"Total steps: {train_step}")
         logger.info(f"Total time: {elapsed_total/60:.2f} minutes")
         logger.info(f"Average speed: {train_step/(elapsed_total):.2f} steps/sec")
         logger.info("="*70)

@@ -141,7 +141,7 @@ You can run training manually or via script. Need 2 terminals/devices.
 ### Inference
 After training, generate text:
 ```bash
-python infer_2device.py --prompt "name : Blue Spice | Type : restaurant | food : French | price : more than £ 30 | area : riverside||" --max_length 50 --temperature 1.0 --top_k 50
+python infer_2device.py --prompt "name : Blue Spice | food : Italian | price : less than £ 20 | area : riverside<|endoftext|>"
 ```
 - Example Output: "name : Blue Spice | Type : restaurant | food : French | price : more than £ 30 | area : riverside|| - Blue is in city , priced more £ 30"
 - Adjust parameters for creativity/diversity.

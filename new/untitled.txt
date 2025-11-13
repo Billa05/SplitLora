@@ -1,0 +1,687 @@
+def insertion_sort(arr):
+    for i in range(1, len(arr)):
+        key = arr[i]        # element to be inserted
+        j = i - 1
+
+        # Shift elements greater than key to the right
+        while j >= 0 and arr[j] > key:
+            arr[j + 1] = arr[j]
+            j -= 1
+
+        # Place key at correct position
+        arr[j + 1] = key
+
+    return arr
+
+
+# Example usage
+numbers = [5, 2, 9, 1, 5, 6]
+print("Sorted:", insertion_sort(numbers))
+
+def merge_sort(arr):
+    # Base case: a list of 0 or 1 element is already sorted
+    if len(arr) <= 1:
+        return arr
+
+    # Split the array into two halves
+    mid = len(arr) // 2
+    left = merge_sort(arr[:mid])
+    right = merge_sort(arr[mid:])
+
+    # Merge the sorted halves
+    return merge(left, right)
+
+
+def merge(left, right):
+    result = []
+    i = j = 0
+
+    # Compare and merge elements
+    while i < len(left) and j < len(right):
+        if left[i] < right[j]:
+            result.append(left[i])
+            i += 1
+        else:
+            result.append(right[j])
+            j += 1
+
+    # Add remaining elements
+    result.extend(left[i:])
+    result.extend(right[j:])
+
+    return result
+
+
+# Example usage
+numbers = [38, 27, 43, 3, 9, 82, 10]
+print("Sorted:", merge_sort(numbers))
+
+def rod_cutting(prices, n):
+    # dp[i] will store the maximum revenue for rod length i
+    dp = [0] * (n + 1)
+
+    # Build the table dp[] from length 1 to n
+    for length in range(1, n + 1):
+        max_val = 0
+        for cut in range(1, length + 1):
+            max_val = max(max_val, prices[cut - 1] * 1 + dp[length - cut])
+        dp[length] = max_val
+
+    return dp[n]
+
+
+# Example usage
+prices = [1, 5, 8, 9, 10, 17, 17, 20]
+n = 8
+print("Maximum Revenue:", rod_cutting(prices, n))
+
+def matrix_chain_multiplication(p):
+    n = len(p)
+    
+    # dp[i][j] = minimum multiplications for matrices Ai...Aj
+    dp = [[0] * n for _ in range(n)]
+
+    # L is chain length (from 2 to n-1)
+    for L in range(2, n):
+        for i in range(1, n - L + 1):
+            j = i + L - 1
+            dp[i][j] = float('inf')
+
+            # Try all possible places to split
+            for k in range(i, j):
+                cost = dp[i][k] + dp[k + 1][j] + p[i - 1] * p[k] * p[j]
+                dp[i][j] = min(dp[i][j], cost)
+
+    return dp[1][n - 1]
+
+
+# Example
+p = [1, 2, 3, 4]    # A1 = 1x2, A2 = 2x3, A3 = 3x4
+print("Minimum multiplications:", matrix_chain_multiplication(p))
+
+def lcs(s1, s2):
+    m = len(s1)
+    n = len(s2)
+
+    # dp[i][j] = LCS length of s1[0..i-1] and s2[0..j-1]
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+
+    # Fill table
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+
+            if s1[i - 1] == s2[j - 1]:
+                dp[i][j] = 1 + dp[i - 1][j - 1]
+
+            else:
+                dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+
+    return dp[m][n]
+
+
+# Example
+str1 = "ABCBDAB"
+str2 = "BDCABA"
+
+print("Length of LCS:", lcs(str1, str2))
+
+def knapsack(weights, values, W):
+    n = len(weights)
+
+    # dp[i][w] = maximum value using first i items with capacity w
+    dp = [[0] * (W + 1) for _ in range(n + 1)]
+
+    # Fill table
+    for i in range(1, n + 1):
+        for w in range(1, W + 1):
+            if weights[i - 1] <= w:
+                # Option 1: take the item
+                take = values[i - 1] + dp[i - 1][w - weights[i - 1]]
+
+                # Option 2: skip the item
+                skip = dp[i - 1][w]
+
+                dp[i][w] = max(take, skip)
+
+            else:
+                # Cannot take the item
+                dp[i][w] = dp[i - 1][w]
+
+    return dp[n][W]
+
+
+# Example usage
+weights = [1, 3, 4, 5]
+values = [1, 4, 5, 7]
+W = 7
+
+print("Maximum value:", knapsack(weights, values, W))
+
+def max_crossing_sum(arr, left, mid, right):
+    # Include elements on left of mid
+    left_sum = float('-inf')
+    curr = 0
+    for i in range(mid, left - 1, -1):
+        curr += arr[i]
+        left_sum = max(left_sum, curr)
+
+    # Include elements on right of mid
+    right_sum = float('-inf')
+    curr = 0
+    for i in range(mid + 1, right + 1):
+        curr += arr[i]
+        right_sum = max(right_sum, curr)
+
+    return left_sum + right_sum
+
+
+def max_subarray(arr, left, right):
+    # Base case: only one element
+    if left == right:
+        return arr[left]
+
+    mid = (left + right) // 2
+
+    # 1. Max subarray entirely in left half
+    left_max = max_subarray(arr, left, mid)
+
+    # 2. Max subarray entirely in right half
+    right_max = max_subarray(arr, mid + 1, right)
+
+    # 3. Max subarray crossing the midpoint
+    cross_max = max_crossing_sum(arr, left, mid, right)
+
+    return max(left_max, right_max, cross_max)
+
+
+# Example usage
+arr = [2, -4, 5, 1, -2, 6, -3]
+n = len(arr)
+
+print("Maximum Subarray Sum:", max_subarray(arr, 0, n - 1))
+
+def karatsuba(x, y):
+    # Convert to strings for digit splitting
+    x_str = str(x)
+    y_str = str(y)
+
+    # Base case: small integers → normal multiplication
+    if len(x_str) == 1 or len(y_str) == 1:
+        return x * y
+
+    # Make lengths equal by padding
+    n = max(len(x_str), len(y_str))
+    if n % 2 != 0:
+        n += 1
+
+    x_str = x_str.zfill(n)
+    y_str = y_str.zfill(n)
+
+    # Split into halves
+    m = n // 2
+
+    a = int(x_str[:m])
+    b = int(x_str[m:])
+    c = int(y_str[:m])
+    d = int(y_str[m:])
+
+    # 3 recursive multiplications
+    ac = karatsuba(a, c)
+    bd = karatsuba(b, d)
+    ad_plus_bc = karatsuba(a + b, c + d) - ac - bd
+
+    # Combine results
+    return ac * 10**(2 * (n - m)) + ad_plus_bc * 10**(n - m) + bd
+
+
+# Example usage
+x = 1234
+y = 5678
+
+print("Karatsuba result:", karatsuba(x, y))
+print("Actual result:   ", x * y)
+
+def is_safe(board, row, col, n):
+    # Check column
+    for i in range(row):
+        if board[i] == col:
+            return False
+
+    # Check left diagonal
+    for i, j in zip(range(row - 1, -1, -1), range(col - 1, -1, -1)):
+        if board[i] == j:
+            return False
+
+    # Check right diagonal
+    for i, j in zip(range(row - 1, -1, -1), range(col + 1, n)):
+        if board[i] == j:
+            return False
+
+    return True
+
+
+def solve_n_queens_util(row, board, n, solutions):
+    if row == n:
+        # Found a full solution
+        solutions.append(board.copy())
+        return
+
+    # Try placing a queen in every column
+    for col in range(n):
+        if is_safe(board, row, col, n):
+            board[row] = col
+            solve_n_queens_util(row + 1, board, n, solutions)
+            board[row] = -1  # backtrack
+
+
+def solve_n_queens(n):
+    board = [-1] * n
+    solutions = []
+    solve_n_queens_util(0, board, n, solutions)
+    return solutions
+
+
+# Example usage
+n = 4
+solutions = solve_n_queens(n)
+print(f"Number of solutions for {n}-Queens:", len(solutions))
+print("Solutions (each list shows queen column positions by row):")
+for sol in solutions:
+    print(sol)
+
+class Node:
+    def __init__(self, char, freq):
+        self.char = char
+        self.freq = freq
+        self.left = None
+        self.right = None
+
+
+def extract_min(heap):
+    # remove the smallest element from the heap (list)
+    min_index = 0
+    for i in range(1, len(heap)):
+        if heap[i].freq < heap[min_index].freq:
+            min_index = i
+    return heap.pop(min_index)
+
+
+def insert_heap(heap, node):
+    heap.append(node)
+
+
+def build_huffman_tree(chars, freqs):
+    heap = []
+
+    # Step 1: Create a leaf node for each character
+    for i in range(len(chars)):
+        insert_heap(heap, Node(chars[i], freqs[i]))
+
+    # Step 2: Repeat until only one node remains
+    while len(heap) > 1:
+        # Pick 2 smallest-frequency nodes
+        left = extract_min(heap)
+        right = extract_min(heap)
+
+        # Create new internal node
+        merged = Node(None, left.freq + right.freq)
+        merged.left = left
+        merged.right = right
+
+        # Insert the merged node back
+        insert_heap(heap, merged)
+
+    # Final node is the root
+    return heap[0]
+
+
+def generate_codes(root, code, huffman_codes):
+    if root is None:
+        return
+
+    # Leaf node → actual character
+    if root.char is not None:
+        huffman_codes[root.char] = code
+        return
+
+    # Traverse left = 0, right = 1
+    generate_codes(root.left, code + "0", huffman_codes)
+    generate_codes(root.right, code + "1", huffman_codes)
+
+
+def huffman_encoding(chars, freqs):
+    root = build_huffman_tree(chars, freqs)
+
+    huffman_codes = {}
+    generate_codes(root, "", huffman_codes)
+    return huffman_codes
+
+
+# Example usage
+chars = ['a', 'b', 'c', 'd', 'e']
+freqs = [5, 9, 12, 13, 16]
+
+codes = huffman_encoding(chars, freqs)
+
+print("Huffman Codes:")
+for c in codes:
+    print(c, ":", codes[c])
+
+def activity_selection(start, finish):
+    n = len(start)
+
+    # Pair activities and sort by finish time
+    activities = list(zip(start, finish))
+    activities.sort(key=lambda x: x[1])
+
+    selected = []
+    last_finish = -1
+
+    # Pick activities greedily
+    for s, f in activities:
+        if s >= last_finish:
+            selected.append((s, f))
+            last_finish = f
+
+    return selected
+
+
+# Example usage
+start = [1, 3, 0, 5, 8, 5]
+finish = [2, 4, 6, 7, 9, 9]
+
+result = activity_selection(start, finish)
+print("Selected activities:", result)
+
+def rabin_karp(text, pattern, d=256, q=101):
+    n = len(text)
+    m = len(pattern)
+
+    if m > n:
+        return []
+
+    h = pow(d, m-1) % q     # value of d^(m-1) % q
+    p_hash = 0              # hash of pattern
+    t_hash = 0              # hash of text window
+    result = []
+
+    # Step 1: Compute initial hash values for pattern and first window
+    for i in range(m):
+        p_hash = (d * p_hash + ord(pattern[i])) % q
+        t_hash = (d * t_hash + ord(text[i])) % q
+
+    # Step 2: Slide the pattern over the text
+    for i in range(n - m + 1):
+        # If hash matches, verify character by character
+        if p_hash == t_hash:
+            if text[i:i+m] == pattern:
+                result.append(i)
+
+        # Compute hash for next window
+        if i < n - m:
+            t_hash = (d * (t_hash - ord(text[i]) * h) + ord(text[i + m])) % q
+
+            if t_hash < 0:
+                t_hash += q
+
+    return result
+
+
+# Example usage
+text = "ABCCDDAEFG"
+pattern = "CDD"
+print("Pattern found at positions:", rabin_karp(text, pattern))
+
+def compute_lps(pattern):
+    m = len(pattern)
+    lps = [0] * m
+
+    length = 0   # length of previous longest prefix suffix
+    i = 1
+
+    while i < m:
+        if pattern[i] == pattern[length]:
+            length += 1
+            lps[i] = length
+            i += 1
+        else:
+            if length != 0:
+                length = lps[length - 1]
+            else:
+                lps[i] = 0
+                i += 1
+
+    return lps
+
+
+def kmp(text, pattern):
+    n = len(text)
+    m = len(pattern)
+
+    lps = compute_lps(pattern)
+    result = []
+
+    i = 0  # index in text
+    j = 0  # index in pattern
+
+    while i < n:
+        if text[i] == pattern[j]:
+            i += 1
+            j += 1
+
+        if j == m:
+            result.append(i - j)  # match found
+            j = lps[j - 1]
+
+        elif i < n and text[i] != pattern[j]:
+            if j != 0:
+                j = lps[j - 1]
+            else:
+                i += 1
+
+    return result
+
+
+# Example usage
+text = "ABABDABACDABABCABAB"
+pattern = "ABABCABAB"
+print("Pattern found at positions:", kmp(text, pattern))
+
+def prim_mst(graph):
+    n = len(graph)
+    selected = [False] * n
+    key = [float('inf')] * n
+    parent = [-1] * n
+
+    key[0] = 0
+
+    for _ in range(n):
+        # pick the minimum key vertex not yet included
+        u = min((k for k in range(n) if not selected[k]), key=lambda k: key[k])
+        selected[u] = True
+
+        # update neighbors
+        for v in range(n):
+            if graph[u][v] and not selected[v] and graph[u][v] < key[v]:
+                key[v] = graph[u][v]
+                parent[v] = u
+
+    mst = []
+    for i in range(1, n):
+        mst.append((parent[i], i, graph[i][parent[i]]))
+
+    return mst
+
+
+# Example adjacency matrix
+graph = [
+    [0, 2, 0, 6, 0],
+    [2, 0, 3, 8, 5],
+    [0, 3, 0, 0, 7],
+    [6, 8, 0, 0, 9],
+    [0, 5, 7, 9, 0]
+]
+
+print("Prim MST:", prim_mst(graph))
+
+def floyd_warshall(graph):
+    n = len(graph)
+    dist = [row[:] for row in graph]
+
+    for k in range(n):
+        for i in range(n):
+            for j in range(n):
+                if dist[i][k] + dist[k][j] < dist[i][j]:
+                    dist[i][j] = dist[i][k] + dist[k][j]
+
+    return dist
+
+
+INF = 10**9
+graph = [
+    [0,   5, INF, 10],
+    [INF, 0,   3, INF],
+    [INF, INF, 0,   1],
+    [INF, INF, INF, 0]
+]
+
+result = floyd_warshall(graph)
+print("All-Pairs Shortest Path Matrix:")
+for row in result:
+    print(row)
+
+def dfs(rGraph, s, t, visited, parent):
+    visited[s] = True
+    if s == t:
+        return True
+
+    for v in range(len(rGraph)):
+        if not visited[v] and rGraph[s][v] > 0:
+            parent[v] = s
+            if dfs(rGraph, v, t, visited, parent):
+                return True
+    return False
+
+
+def ford_fulkerson(graph, source, sink):
+    n = len(graph)
+    rGraph = [row[:] for row in graph]   # residual graph
+
+    parent = [-1] * n
+    max_flow = 0
+
+    # While there is a path from source to sink
+    while True:
+        visited = [False] * n
+        if not dfs(rGraph, source, sink, visited, parent):
+            break
+
+        # Find minimum residual capacity along the path
+        path_flow = float('inf')
+        v = sink
+        while v != source:
+            u = parent[v]
+            path_flow = min(path_flow, rGraph[u][v])
+            v = u
+
+        # Update residual capacities
+        v = sink
+        while v != source:
+            u = parent[v]
+            rGraph[u][v] -= path_flow
+            rGraph[v][u] += path_flow
+            v = u
+
+        max_flow += path_flow
+
+    return max_flow
+
+
+# Example
+graph = [
+    [0, 16, 13, 0, 0, 0],
+    [0, 0, 10, 12, 0, 0],
+    [0, 4, 0, 0, 14, 0],
+    [0, 0, 9, 0, 0, 20],
+    [0, 0, 0, 7, 0, 4],
+    [0, 0, 0, 0, 0, 0]
+]
+
+print("Max Flow (Ford–Fulkerson):", ford_fulkerson(graph, 0, 5))
+
+def orientation(p, q, r):
+    val = (q[1] - p[1]) * (r[0] - q[0]) - \
+          (q[0] - p[0]) * (r[1] - q[1])
+    if val == 0: return 0       # collinear
+    return 1 if val > 0 else 2  # clockwise or counter-clockwise
+
+
+def dist(p, q):
+    return (p[0]-q[0])**2 + (p[1]-q[1])**2
+
+
+def convex_hull(points):
+    n = len(points)
+    if n < 3:
+        return points
+
+    # Step 1: lowest point
+    ymin = min(points, key=lambda p: (p[1], p[0]))
+    points.remove(ymin)
+
+    # Step 2: sort by polar angle w.r.t ymin
+    points.sort(key=lambda p: (
+        (p[1]-ymin[1])/(p[0]-ymin[0]+1e-9)
+    ))
+
+    hull = [ymin, points[0], points[1]]
+
+    # Step 3: process remaining points
+    for p in points[2:]:
+        while len(hull) >= 2 and orientation(hull[-2], hull[-1], p) != 2:
+            hull.pop()
+        hull.append(p)
+
+    return hull
+
+
+# Example
+pts = [(0,3),(1,1),(2,2),(4,4),(0,0),(1,2),(3,1),(3,3)]
+print("Convex Hull:", convex_hull(pts))
+
+def orientation(p, q, r):
+    val = (q[1] - p[1]) * (r[0] - q[0]) - \
+          (q[0] - p[0]) * (r[1] - q[1])
+
+    if val == 0:
+        return 0    # collinear
+    return 1 if val > 0 else 2   # clockwise / counterclockwise
+
+
+def on_segment(p, q, r):
+    return (min(p[0], r[0]) <= q[0] <= max(p[0], r[0]) and
+            min(p[1], r[1]) <= q[1] <= max(p[1], r[1]))
+
+
+def do_intersect(a, b, c, d):
+    o1 = orientation(a, b, c)
+    o2 = orientation(a, b, d)
+    o3 = orientation(c, d, a)
+    o4 = orientation(c, d, b)
+
+    # General case
+    if o1 != o2 and o3 != o4:
+        return True
+
+    # Special cases
+    if o1 == 0 and on_segment(a, c, b): return True
+    if o2 == 0 and on_segment(a, d, b): return True
+    if o3 == 0 and on_segment(c, a, d): return True
+    if o4 == 0 and on_segment(c, b, d): return True
+
+    return False
+
+
+# Example
+print(do_intersect((1,1),(10,1),(1,2),(10,2)))
+
