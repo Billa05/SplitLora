@@ -10,3 +10,5 @@ adapter_client_2_final.pth
 *.log
 lora_device_0.pth
 lora_device_1.pth
+.env
+pretrained_checkpoints

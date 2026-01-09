@@ -1,0 +1,11 @@
+# Requirements for Distributed Split Learning
+
+# Core dependencies (already in original setup)
+torch>=1.13.0
+loralib
+
+# New dependency for distributed training
+websockets>=10.0
+
+# Optional but recommended
+numpy>=1.21.0
