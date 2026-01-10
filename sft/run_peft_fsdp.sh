@@ -1,4 +1,4 @@
-accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
+accelerate launch --config_file "configs/fsdp_config_worker.yaml"  train.py \
 --seed 100 \
 --model_name_or_path "gpt2" \
 --dataset_name "timdettmers/openassistant-guanaco" \
