@@ -1,4 +1,4 @@
-accelerate launch --config_file "configs/fsdp_config_worker.yaml"  train.py \
+accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --seed 100 \
 --model_name_or_path "gpt2" \
 --dataset_name "timdettmers/openassistant-guanaco" \
@@ -35,4 +35,4 @@ accelerate launch --config_file "configs/fsdp_config_worker.yaml"  train.py \
 --lora_dropout 0.1 \
 --lora_target_modules "all-linear" \
 --use_4bit_quantization False \
---use_8bit_quantization True
+--use_8bit_quantization False

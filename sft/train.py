@@ -94,6 +94,7 @@ class DataTrainingArguments:
 
 
 def main(model_args, data_args, training_args):
+    print(f"Main function started on process {os.getpid()}")
     # Set seed for reproducibility
     set_seed(training_args.seed)
 
@@ -110,7 +111,7 @@ def main(model_args, data_args, training_args):
         "append_concat_token": data_args.append_concat_token,
         "add_special_tokens": data_args.add_special_tokens,
     }
-
+    print("at dataset\n")
     # datasets
     train_dataset, eval_dataset = create_datasets(
         tokenizer,
@@ -118,7 +119,7 @@ def main(model_args, data_args, training_args):
         training_args,
         apply_chat_template=model_args.chat_template_format != "none",
     )
-
+    print("at trainer\n")
     # trainer
     trainer = SFTTrainer(
         model=model,
@@ -128,15 +129,19 @@ def main(model_args, data_args, training_args):
         eval_dataset=eval_dataset,
         peft_config=peft_config,
     )
+    print(trainer)
     trainer.accelerator.print(f"{trainer.model}")
     if hasattr(trainer.model, "print_trainable_parameters"):
         trainer.model.print_trainable_parameters()
 
+    trainer.accelerator.print(f"Rank {trainer.accelerator.process_index}: Model loaded, about to start training")
     # train
+    trainer.accelerator.print(f"Rank {trainer.accelerator.process_index}: Starting training")
     checkpoint = None
     if training_args.resume_from_checkpoint is not None:
         checkpoint = training_args.resume_from_checkpoint
     trainer.train(resume_from_checkpoint=checkpoint)
+    trainer.accelerator.print(f"Rank {trainer.accelerator.process_index}: Training completed")
 
     # saving final model
     if trainer.is_fsdp_enabled:
