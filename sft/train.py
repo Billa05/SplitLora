@@ -120,6 +120,10 @@ def main(model_args, data_args, training_args):
         apply_chat_template=model_args.chat_template_format != "none",
     )
     print("at trainer\n")
+    print("Creating SFTTrainer...", flush=True)
+    import sys
+    sys.stdout.flush()
+    
     # trainer
     trainer = SFTTrainer(
         model=model,
@@ -129,7 +133,7 @@ def main(model_args, data_args, training_args):
         eval_dataset=eval_dataset,
         peft_config=peft_config,
     )
-    print(trainer)
+    print("SFTTrainer created successfully!", flush=True)
     trainer.accelerator.print(f"{trainer.model}")
     if hasattr(trainer.model, "print_trainable_parameters"):
         trainer.model.print_trainable_parameters()
